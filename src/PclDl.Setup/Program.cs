@@ -37,13 +37,34 @@ namespace PclDl.Setup
                 }
             }
 
-            var baseDir = targetDir ?? AppDomain.CurrentDomain.BaseDirectory;
-            baseDir = Path.GetFullPath(baseDir).TrimEnd('\\', '/');
-
-            Console.WriteLine("PclDl 一键安装 · 目标目录：" + baseDir);
+            var startDir = Path.GetFullPath(targetDir ?? AppDomain.CurrentDomain.BaseDirectory).TrimEnd('\\', '/');
+            Console.WriteLine("PclDl 一键安装 · 起始目录：" + startDir);
             Console.WriteLine();
 
+            // 自适应：启动器可能就在这一层，也可能在这一层的子目录里，或者本程序被放进了子目录
+            var baseDir = startDir;
             var launcher = DetectLauncher(baseDir, forced);
+            if (launcher == null)
+            {
+                var searchDirs = new List<string>();
+                try { searchDirs.AddRange(Directory.GetDirectories(startDir)); } catch { }
+                try
+                {
+                    var parent = Path.GetDirectoryName(startDir);
+                    if (!string.IsNullOrEmpty(parent)) searchDirs.Add(parent);
+                }
+                catch { }
+                foreach (var dir in searchDirs)
+                {
+                    var found = DetectLauncher(dir, forced);
+                    if (found != null) { baseDir = dir; launcher = found; break; }
+                }
+            }
+            if (launcher != null && baseDir != startDir)
+            {
+                Console.WriteLine("（在子目录/上级目录找到启动器：" + baseDir + "）");
+                Console.WriteLine();
+            }
             if (launcher == null)
             {
                 Console.Error.WriteLine("没有在这找到 PCL 或 HMCL。");
@@ -58,6 +79,14 @@ namespace PclDl.Setup
             if (payload == null) { Console.Error.WriteLine("安装包内容缺失（payload 未嵌入），请重新构建。"); return 3; }
 
             var report = new List<string>();
+            if (launcher.Kind == "pcl" && IsPclRunning())
+            {
+                Console.Error.WriteLine("PCL 正在运行，插件文件会写入失败。");
+                Console.Error.WriteLine("请先完全关闭 PCL（包括托盘/后台进程）后再运行本程序。");
+                try { Directory.Delete(payload, true); } catch { }
+                return 5;
+            }
+
             try
             {
                 if (launcher.Kind == "pcl") InstallForPcl(baseDir, launcher, payload, report);
@@ -209,6 +238,16 @@ namespace PclDl.Setup
             "PclDl.Injector.exe", "PclDl.Bridge.dll", "PclDl.Plugin.dll",
             "PclDl.Core.dll", "Newtonsoft.Json.dll", "PclDl.Probe.exe"
         };
+
+        private static bool IsPclRunning()
+        {
+            try
+            {
+                var processes = Process.GetProcessesByName("Plain Craft Launcher 2");
+                return processes != null && processes.Length > 0;
+            }
+            catch { return false; }
+        }
 
         private static void InstallForPcl(string dir, LauncherInfo launcher, string payload, List<string> report)
         {
