@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <AssemblyName>PclDl.Setup</AssemblyName>
+    <RootNamespace>PclDl.Setup</RootNamespace>
+    <ApplicationIcon />
+    <Product>PclDl 一键安装</Product>
+    <Company>PclDl</Company>
+    <Version>1.0.0.0</Version>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="payload.zip" Condition="Exists('payload.zip')">
+      <LogicalName>PclDl.Setup.payload.zip</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,31 @@
+# 构建产物
+dist/
+bin/
+obj/
+src/*/bin/
+src/*/obj/
+native/**/bin/
+native/**/obj/
+src/PclDl.Setup/payload.zip
+
+# 测试/本地产物
+pcl-official/
+hmcl/
+hmcl-test/
+pcl-harness/
+*.log
+*.png
+PclDl-安装报告.txt
+install.json
+
+# 独立参考源码（体积大、非本项目代码）
+PCL2-source/
+PCL2-source-2.14.0.0/
+
+# ���/ʵ��Ŀ¼
+_diag/
+_envtest/
+*.obj
+*.pdb
+*.suo
+

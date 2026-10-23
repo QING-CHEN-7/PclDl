@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <AssemblyName>PclDl.Bootstrap</AssemblyName>
+    <RootNamespace>PclDl.Bootstrap</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>PclDl.Bootstrap.snk</AssemblyOriginatorKeyFile>
+  </PropertyGroup>
+</Project>
