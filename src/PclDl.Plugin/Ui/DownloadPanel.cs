@@ -203,7 +203,7 @@ namespace PclDl.Plugin.Ui
             taskBody.Children.Add(_taskPanel);
             page.Children.Add(_ui.Card("任务队列", taskBody));
 
-            // —— 卡片 3：导入整合包 ——
+            // —— 卡片 3：导入本地整合包文件（不是社区资源浏览器）——
             var packBody = new StackPanel();
             var packRow = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
             _packBox = (TextBox)_ui.TextBox("", 360);
@@ -221,14 +221,16 @@ namespace PclDl.Plugin.Ui
                 }
                 catch (Exception ex) { UpdatePackStatus("选择文件失败：" + ex.Message); }
             }, 28, new Thickness(0, 0, 8, 8)));
-            packRow.Children.Add(_ui.Button("安装整合包", true, () => StartModpack(_packBox.Text), 30, new Thickness(0, 0, 0, 8)));
+            packRow.Children.Add(_ui.Button("导入并安装", true, () => StartModpack(_packBox.Text), 30, new Thickness(0, 0, 0, 8)));
+            // 明确语义：这里只处理本地文件，不做社区资源浏览/下载
+
             packBody.Children.Add(packRow);
 
-            _packStatus = _ui.Hint("支持 Modrinth（.mrpack）与 CurseForge（.zip）整合包；CurseForge 需在 PCL2Plugins\\curseforge.key 中填写 API Key");
+            _packStatus = _ui.Hint("只处理你已下载到本地的 .mrpack / CurseForge .zip 文件（PCL 的社区资源下载不受影响）；CurseForge 包需在 PCL2Plugins\\curseforge.key 中填写 API Key");
             _packStatus.Margin = new Thickness(0, 0, 0, 4);
             packBody.Children.Add(_packStatus);
 
-            page.Children.Add(_ui.Card("导入整合包", packBody));
+            page.Children.Add(_ui.Card("导入本地整合包文件", packBody));
 
             // —— 卡片 4：插件自检 ——
             var checkBody = new StackPanel();
