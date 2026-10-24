@@ -30,6 +30,7 @@
 2. 双击运行一次。它会自动识别 PCL 与版本，写入 `PCL2Plugins\\`，并创建
    `启动 PCL2（插件版）.lnk`。
 3. 以后从该快捷方式启动即可，**不需要再运行安装器**（重复运行也是安全的）。
+   若识别到的 PCL 低于 2.99，安装器会同时关闭它的自动更新（见下方功能说明）。
 
 ## 快速开始（HMCL）
 
@@ -55,6 +56,12 @@ PclDl.Cli.exe verify / repair <版本ID> --dir <目录>
 - 页面（只占「下载 → 安装」）：版本列表（正式/快照/远古分组、搜索、已安装标记）、
   安装选项（加载器 / 安装路径）、进度（速度 / 剩余时间 / 当前文件）、任务队列（重试 / 清理）
 - 挂载策略：E1 接管下载页 / E2 自建入口 / E3 独立窗口；**社区资源子页面一律不接管**
+- **低版本启动器自动关更新**：安装器识别到的启动器版本低于阈值时，顺手关掉它自己的自动更新，
+  避免它把自己更新成与插件不兼容的版本
+  - PCL：`PCL\\Setup.ini` 里 `ToolUpdateRelease:False`、`ToolUpdateSnapshot:False`（默认阈值 2.99）
+  - HMCL：`.hmcl\\config\\launcher-settings.json` 里 `acceptPreviewUpdate:false`、
+    `disableAutoShowUpdateDialog:true`（默认阈值 3.16）
+  - 阈值可用 `--min-pcl <ver>` / `--min-hmcl <ver>` 覆盖；达到阈值的启动器**不会被改动**
 
 ## 构建
 

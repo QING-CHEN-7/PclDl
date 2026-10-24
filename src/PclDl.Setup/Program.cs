@@ -25,6 +25,10 @@ namespace PclDl.Setup
 
             string targetDir = null, forced = null;
             var silent = false;
+            // 低于这些版本的启动器，安装时顺手关掉它们的自动更新（可用 --min-pcl/--min-hmcl 覆盖）
+            var minPcl = "2.99";
+            var minHmcl = "3.16";
+            string assumePcl = null, assumeHmcl = null;
             for (int i = 0; i < args.Length; i++)
             {
                 switch (args[i].ToLowerInvariant())
@@ -33,6 +37,10 @@ namespace PclDl.Setup
                     case "--pcl": forced = "pcl"; break;
                     case "--hmcl": forced = "hmcl"; break;
                     case "--silent": silent = true; break;
+                    case "--min-pcl": minPcl = i + 1 < args.Length ? args[++i] : minPcl; break;
+                    case "--min-hmcl": minHmcl = i + 1 < args.Length ? args[++i] : minHmcl; break;
+                    case "--assume-pcl-version": assumePcl = i + 1 < args.Length ? args[++i] : null; break;
+                    case "--assume-hmcl-version": assumeHmcl = i + 1 < args.Length ? args[++i] : null; break;
                     case "--help": case "-h": Usage(); return 0;
                 }
             }
@@ -72,6 +80,9 @@ namespace PclDl.Setup
                 return 2;
             }
 
+            if (launcher.Kind == "pcl" && !string.IsNullOrEmpty(assumePcl)) launcher.Version = assumePcl;
+            if (launcher.Kind == "hmcl" && !string.IsNullOrEmpty(assumeHmcl)) launcher.Version = assumeHmcl;
+
             Console.WriteLine("识别到启动器：" + launcher.Describe());
             Console.WriteLine();
 
@@ -91,6 +102,19 @@ namespace PclDl.Setup
             {
                 if (launcher.Kind == "pcl") InstallForPcl(baseDir, launcher, payload, report);
                 else InstallForHmcl(baseDir, launcher, payload, report);
+
+                // 低版本启动器：关掉自动更新，避免它把自己更新成和插件不兼容的版本
+                var minVersion = launcher.Kind == "pcl" ? minPcl : minHmcl;
+                if (IsOlderThan(launcher.Version, minVersion))
+                {
+                    if (launcher.Kind == "pcl") DisablePclAutoUpdate(baseDir, report);
+                    else DisableHmclAutoUpdate(baseDir, report);
+                }
+                else
+                {
+                    report.Add("启动器版本 " + (launcher.Version ?? "未知") + " ≥ " + minVersion +
+                               "，未改动自动更新设置");
+                }
             }
             catch (Exception ex)
             {
@@ -140,6 +164,7 @@ namespace PclDl.Setup
             Console.WriteLine("  PclDl.Setup.exe --dir <文件夹>   指定启动器文件夹");
             Console.WriteLine("  PclDl.Setup.exe --pcl | --hmcl   强制按某类启动器处理");
             Console.WriteLine("  PclDl.Setup.exe --silent         不等待");
+            Console.WriteLine("  --min-pcl <ver> / --min-hmcl <ver>  低于该版本的启动器会关闭自动更新（默认 2.99 / 3.16）");
         }
 
         internal sealed class LauncherInfo
@@ -238,6 +263,129 @@ namespace PclDl.Setup
             "PclDl.Injector.exe", "PclDl.Bridge.dll", "PclDl.Plugin.dll",
             "PclDl.Core.dll", "Newtonsoft.Json.dll", "PclDl.Probe.exe"
         };
+
+        /// <summary>按数字段比较版本：left 是否小于 right（例如 2.8.0 &lt; 2.99）。</summary>
+        internal static bool IsOlderThan(string left, string right)
+        {
+            if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right)) return false;
+            var a = ExtractNumbers(left);
+            var b = ExtractNumbers(right);
+            if (a.Count == 0 || b.Count == 0) return false;
+            for (int i = 0; i < Math.Max(a.Count, b.Count); i++)
+            {
+                var x = i < a.Count ? a[i] : 0;
+                var y = i < b.Count ? b[i] : 0;
+                if (x != y) return x < y;
+            }
+            return false;
+        }
+
+        private static List<int> ExtractNumbers(string version)
+        {
+            var list = new List<int>();
+            var current = new StringBuilder();
+            foreach (var ch in version)
+            {
+                if (char.IsDigit(ch)) { current.Append(ch); continue; }
+                if (current.Length > 0) { list.Add(int.Parse(current.ToString())); current.Clear(); }
+            }
+            if (current.Length > 0) list.Add(int.Parse(current.ToString()));
+            return list;
+        }
+
+        /// <summary>PCL：PCL\\Setup.ini 里 ToolUpdateRelease / ToolUpdateSnapshot 置 False。</summary>
+        private static void DisablePclAutoUpdate(string dir, List<string> report)
+        {
+            try
+            {
+                var pclDir = Path.Combine(dir, "PCL");
+                Directory.CreateDirectory(pclDir);
+                var ini = Path.Combine(pclDir, "Setup.ini");
+
+                var lines = new List<string>();
+                if (File.Exists(ini)) lines.AddRange(File.ReadAllLines(ini));
+
+                var changed = new List<string>();
+                foreach (var key in new[] { "ToolUpdateRelease", "ToolUpdateSnapshot" })
+                {
+                    var index = lines.FindIndex(l => l.TrimStart().StartsWith(key + ":", StringComparison.OrdinalIgnoreCase));
+                    if (index >= 0)
+                    {
+                        var old = lines[index];
+                        lines[index] = key + ":False";
+                        if (!old.Trim().EndsWith("False", StringComparison.OrdinalIgnoreCase)) changed.Add(key + "（原 " + old.Trim() + "）");
+                        else changed.Add(key + "（本来就是 False）");
+                    }
+                    else
+                    {
+                        lines.Add(key + ":False");
+                        changed.Add(key + "（新增）");
+                    }
+                }
+
+                File.WriteAllLines(ini, lines, new UTF8Encoding(false));
+                report.Add("已关闭 PCL 自动更新（PCL\\Setup.ini）：" + string.Join("，", changed));
+            }
+            catch (Exception ex)
+            {
+                report.Add("关闭 PCL 自动更新失败（不影响使用）：" + ex.Message);
+            }
+        }
+
+        /// <summary>HMCL：.hmcl\\config\\launcher-settings.json 里关掉预览版更新与自动弹更新框。</summary>
+        private static void DisableHmclAutoUpdate(string dir, List<string> report)
+        {
+            var candidates = new List<string>();
+            try
+            {
+                candidates.Add(Path.Combine(dir, ".hmcl", "config", "launcher-settings.json"));
+                var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                if (!string.IsNullOrEmpty(roaming))
+                    candidates.Add(Path.Combine(roaming, ".hmcl", "config", "launcher-settings.json"));
+            }
+            catch { }
+
+            var done = new List<string>();
+            foreach (var path in candidates)
+            {
+                try
+                {
+                    if (!File.Exists(path)) continue;
+                    var text = File.ReadAllText(path);
+                    var updated = text;
+
+                    if (updated.IndexOf("\"acceptPreviewUpdate\"", StringComparison.OrdinalIgnoreCase) < 0)
+                        updated = InsertJsonField(updated, "\"acceptPreviewUpdate\": false");
+                    if (updated.IndexOf("\"disableAutoShowUpdateDialog\"", StringComparison.OrdinalIgnoreCase) < 0)
+                        updated = InsertJsonField(updated, "\"disableAutoShowUpdateDialog\": true");
+
+                    if (updated != text)
+                    {
+                        File.WriteAllText(path, updated, new UTF8Encoding(false));
+                        done.Add(path);
+                    }
+                    else done.Add(path + "（已设置过）");
+                }
+                catch (Exception ex)
+                {
+                    report.Add("处理 " + path + " 失败：" + ex.Message);
+                }
+            }
+
+            if (done.Count == 0) report.Add("没有找到 HMCL 的 launcher-settings.json，跳过自动更新设置");
+            else report.Add("已关闭 HMCL 自动更新/自动弹更新框：" + string.Join("；", done));
+        }
+
+        /// <summary>在 JSON 对象的最后一个 } 前插入一个字段（不引第三方 JSON 库）。</summary>
+        private static string InsertJsonField(string json, string field)
+        {
+            var end = json.LastIndexOf('}');
+            if (end < 0) return json;
+            var head = json.Substring(0, end).TrimEnd();
+            var tail = json.Substring(end);
+            var needsComma = head.EndsWith("{") ? false : true;
+            return head + (needsComma ? ",\n  " : "\n  ") + field + "\n" + tail;
+        }
 
         private static bool IsPclRunning()
         {
