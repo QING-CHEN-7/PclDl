@@ -1,5 +1,7 @@
 # PclDl · 给 PCL2 的下载插件（含 HMCL 适配工具链）
 
+> 仓库：https://github.com/QING-CHEN-7/PclDl
+>
 > 非官方项目。与 Plain Craft Launcher 2（作者 龙腾猫跃）、HMCL（作者 huangyuhui）均无关联，
 > 未获得其作者授权或背书。本项目不改动启动器本体文件，也不替换启动器已有的任何功能。
 
