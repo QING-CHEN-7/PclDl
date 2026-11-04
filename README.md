@@ -58,12 +58,17 @@ PclDl.Cli.exe verify / repair <版本ID> --dir <目录>
 - 页面（只占「下载 → 安装」）：版本列表（正式/快照/远古分组、搜索、已安装标记）、
   安装选项（加载器 / 安装路径）、进度（速度 / 剩余时间 / 当前文件）、任务队列（重试 / 清理）
 - 挂载策略：E1 接管下载页 / E2 自建入口 / E3 独立窗口；**社区资源子页面一律不接管**
-- **低版本启动器自动关更新**：安装器识别到的启动器版本低于阈值时，顺手关掉它自己的自动更新，
-  避免它把自己更新成与插件不兼容的版本
-  - PCL：`PCL\\Setup.ini` 里 `ToolUpdateRelease:False`、`ToolUpdateSnapshot:False`（默认阈值 2.99）
+- **低版本启动器自动关更新（判定已收束）**：只在"版本可解析且严格低于下限"时动手，
+  且只关更新相关开关，不碰下载功能
+  - 下限：PCL **2.9**、HMCL **3.5**（都低于我们验证过的 2.99 / 3.16 才处理）
+  - PCL：`PCL\\Setup.ini` 里 `ToolUpdateRelease:False`、`ToolUpdateSnapshot:False`
   - HMCL：`.hmcl\\config\\launcher-settings.json` 里 `acceptPreviewUpdate:false`、
-    `disableAutoShowUpdateDialog:true`（默认阈值 3.16）
-  - 阈值可用 `--min-pcl <ver>` / `--min-hmcl <ver>` 覆盖；达到阈值的启动器**不会被改动**
+    `disableAutoShowUpdateDialog:true`（只关"自动弹更新框/接受预览版"，HMCL 自己的
+    版本下载、社区资源下载照旧可用）
+  - 版本可比性：忽略 `v` 前缀与 `-beta`/`+build` 后缀，缺失段补 0（`2.9` == `2.9.0.0`）
+  - 版本号解析不出来时**一律不改**（不做猜测）
+  - 覆盖参数：`--min-pcl` / `--min-hmcl` 改下限，`--no-update-guard` 完全跳过；
+    `--selftest-version` 可跑 14 条判定自检
 
 ## 构建
 

@@ -26,9 +26,10 @@ namespace PclDl.Setup
             string targetDir = null, forced = null;
             var silent = false;
             // 低于这些版本的启动器，安装时顺手关掉它们的自动更新（可用 --min-pcl/--min-hmcl 覆盖）
-            var minPcl = "2.99";
-            var minHmcl = "3.16";
+            var minPcl = "2.9";
+            var minHmcl = "3.5";
             string assumePcl = null, assumeHmcl = null;
+            var updateGuard = true;
             for (int i = 0; i < args.Length; i++)
             {
                 switch (args[i].ToLowerInvariant())
@@ -41,6 +42,8 @@ namespace PclDl.Setup
                     case "--min-hmcl": minHmcl = i + 1 < args.Length ? args[++i] : minHmcl; break;
                     case "--assume-pcl-version": assumePcl = i + 1 < args.Length ? args[++i] : null; break;
                     case "--assume-hmcl-version": assumeHmcl = i + 1 < args.Length ? args[++i] : null; break;
+                    case "--no-update-guard": updateGuard = false; break;
+                    case "--selftest-version": return VersionGateSelfTest();
                     case "--help": case "-h": Usage(); return 0;
                 }
             }
@@ -103,17 +106,31 @@ namespace PclDl.Setup
                 if (launcher.Kind == "pcl") InstallForPcl(baseDir, launcher, payload, report);
                 else InstallForHmcl(baseDir, launcher, payload, report);
 
-                // 低版本启动器：关掉自动更新，避免它把自己更新成和插件不兼容的版本
+                // 低版本启动器：关掉自动更新，避免它把自己更新成和插件不兼容的版本。
+                // 判定收束：只在"版本可解析且严格低于阈值"时动手；未知版本一律不改。
                 var minVersion = launcher.Kind == "pcl" ? minPcl : minHmcl;
-                if (IsOlderThan(launcher.Version, minVersion))
+                if (!updateGuard)
                 {
-                    if (launcher.Kind == "pcl") DisablePclAutoUpdate(baseDir, report);
-                    else DisableHmclAutoUpdate(baseDir, report);
+                    report.Add("已指定 --no-update-guard，不改动启动器更新设置");
                 }
                 else
                 {
-                    report.Add("启动器版本 " + (launcher.Version ?? "未知") + " ≥ " + minVersion +
-                               "，未改动自动更新设置");
+                    var verdict = VersionGate.Decide(launcher.Version, minVersion);
+                    if (verdict == VersionGate.Verdict.TooOld)
+                    {
+                        if (launcher.Kind == "pcl") DisablePclAutoUpdate(baseDir, report);
+                        else DisableHmclAutoUpdate(baseDir, report);
+                        report.Add("判定：" + launcher.Version + " < " + minVersion + "（老版本），已关闭它的自动更新");
+                    }
+                    else if (verdict == VersionGate.Verdict.NewEnough)
+                    {
+                        report.Add("判定：" + launcher.Version + " ≥ " + minVersion + "，未改动自动更新设置");
+                    }
+                    else
+                    {
+                        report.Add("判定：版本号无法解析（" + (launcher.Version ?? "null") +
+                                   "），保守起见不改动自动更新设置");
+                    }
                 }
             }
             catch (Exception ex)
@@ -157,6 +174,45 @@ namespace PclDl.Setup
             return 0;
         }
 
+        /// <summary>版本判定自检（不需要启动器）：--selftest-version</summary>
+        private static int VersionGateSelfTest()
+        {
+            var cases = new[]
+            {
+                // actual, floor, 期望
+                new object[] { "2.8.0",        "2.9",  VersionGate.Verdict.TooOld },
+                new object[] { "2.99.0.0",     "2.9",  VersionGate.Verdict.NewEnough },
+                new object[] { "2.9",          "2.9",  VersionGate.Verdict.NewEnough },
+                new object[] { "2.9.0.0",      "2.9",  VersionGate.Verdict.NewEnough },
+                new object[] { "v2.8.1",       "2.9",  VersionGate.Verdict.TooOld },
+                new object[] { "2.9.0-beta",   "2.9",  VersionGate.Verdict.NewEnough },
+                new object[] { "3.4.9",        "3.5",  VersionGate.Verdict.TooOld },
+                new object[] { "3.5",          "3.5",  VersionGate.Verdict.NewEnough },
+                new object[] { "3.16.4",       "3.5",  VersionGate.Verdict.NewEnough },
+                new object[] { "3.16.4+233",   "3.5",  VersionGate.Verdict.NewEnough },
+                new object[] { "unknown",      "3.5",  VersionGate.Verdict.Unknown },
+                new object[] { "",             "3.5",  VersionGate.Verdict.Unknown },
+                new object[] { null,           "3.5",  VersionGate.Verdict.Unknown },
+                new object[] { "2.99.0.0",     "bad",  VersionGate.Verdict.Unknown }
+            };
+
+            var failed = 0;
+            foreach (var item in cases)
+            {
+                var actual = (string)item[0];
+                var floor = (string)item[1];
+                var expected = (VersionGate.Verdict)item[2];
+                var got = VersionGate.Decide(actual, floor);
+                var ok = got == expected;
+                if (!ok) failed++;
+                Console.WriteLine((ok ? "  PASS  " : "  FAIL  ") +
+                                  (actual ?? "null") + " vs " + floor + " -> " + got +
+                                  (ok ? "" : "（期望 " + expected + "）"));
+            }
+            Console.WriteLine("通过 " + (cases.Length - failed) + "，失败 " + failed);
+            return failed == 0 ? 0 : 1;
+        }
+
         private static void Usage()
         {
             Console.WriteLine("PclDl 一键安装");
@@ -164,7 +220,9 @@ namespace PclDl.Setup
             Console.WriteLine("  PclDl.Setup.exe --dir <文件夹>   指定启动器文件夹");
             Console.WriteLine("  PclDl.Setup.exe --pcl | --hmcl   强制按某类启动器处理");
             Console.WriteLine("  PclDl.Setup.exe --silent         不等待");
-            Console.WriteLine("  --min-pcl <ver> / --min-hmcl <ver>  低于该版本的启动器会关闭自动更新（默认 2.99 / 3.16）");
+            Console.WriteLine("  --min-pcl <ver> / --min-hmcl <ver>  低于该版本的启动器会关闭自动更新（默认 2.9 / 3.5）");
+            Console.WriteLine("  --no-update-guard                完全不改动启动器的更新设置");
+            Console.WriteLine("  --selftest-version               跑版本判定自检");
         }
 
         internal sealed class LauncherInfo
@@ -263,35 +321,6 @@ namespace PclDl.Setup
             "PclDl.Injector.exe", "PclDl.Bridge.dll", "PclDl.Plugin.dll",
             "PclDl.Core.dll", "Newtonsoft.Json.dll", "PclDl.Probe.exe"
         };
-
-        /// <summary>按数字段比较版本：left 是否小于 right（例如 2.8.0 &lt; 2.99）。</summary>
-        internal static bool IsOlderThan(string left, string right)
-        {
-            if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right)) return false;
-            var a = ExtractNumbers(left);
-            var b = ExtractNumbers(right);
-            if (a.Count == 0 || b.Count == 0) return false;
-            for (int i = 0; i < Math.Max(a.Count, b.Count); i++)
-            {
-                var x = i < a.Count ? a[i] : 0;
-                var y = i < b.Count ? b[i] : 0;
-                if (x != y) return x < y;
-            }
-            return false;
-        }
-
-        private static List<int> ExtractNumbers(string version)
-        {
-            var list = new List<int>();
-            var current = new StringBuilder();
-            foreach (var ch in version)
-            {
-                if (char.IsDigit(ch)) { current.Append(ch); continue; }
-                if (current.Length > 0) { list.Add(int.Parse(current.ToString())); current.Clear(); }
-            }
-            if (current.Length > 0) list.Add(int.Parse(current.ToString()));
-            return list;
-        }
 
         /// <summary>PCL：PCL\\Setup.ini 里 ToolUpdateRelease / ToolUpdateSnapshot 置 False。</summary>
         private static void DisablePclAutoUpdate(string dir, List<string> report)
