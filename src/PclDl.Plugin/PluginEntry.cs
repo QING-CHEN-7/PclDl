@@ -140,6 +140,8 @@ namespace PclDl.Plugin
             }
             catch (Exception ex) { LogOnce("plugin: 绑定退出/异常钩子失败 " + ex.Message); }
 
+            _mainWindow = window;
+
             PclBinder binder;
             try { binder = PclBinder.TryBind(window.GetType().Assembly); }
             catch (Exception ex) { Log("plugin: 绑定异常 " + ex); return; }
@@ -158,6 +160,17 @@ namespace PclDl.Plugin
             }
 
             StartCatalogWarmup(window);
+
+            // v4 §3：PCL 若彻底删掉下载页（官方已确认不再提供下载功能），就没有 E1 可接管，
+            // 这时走 E2——在标题栏追加一个入口，并把我们的页面挂到内容区。
+            var noDownloadPage = Environment.GetEnvironmentVariable("PCLDL_TEST_NO_DOWNLOAD") == "1" ||
+                                 !HasDownloadPage(window);
+            if (noDownloadPage)
+            {
+                Log("plugin: 未检测到 PCL 下载页，走 E2（自建入口 + 常驻挂载）");
+                MountWithOwnEntry(window, binder);
+                return;
+            }
 
             // 调试用：程序化触发 PCL 的页面切换（等价于点「下载」），便于无焦点环境做验证
             var testPage = Environment.GetEnvironmentVariable("PCLDL_TEST_PAGE");
@@ -254,6 +267,143 @@ namespace PclDl.Plugin
                 catch (Exception ex) { LogOnce("pump loop: " + ex.Message); }
                 Thread.Sleep(250);
             }
+        }
+
+        /// <summary>PCL 的 PageType 枚举里是否还有 Download。</summary>
+        private static bool HasDownloadPage(Window window)
+        {
+            try
+            {
+                var pageType = window.GetType().GetNestedType("PageType");
+                if (pageType == null || !pageType.IsEnum) return false;
+                return Enum.GetNames(pageType).Any(n => string.Equals(n, "Download", StringComparison.OrdinalIgnoreCase));
+            }
+            catch { return false; }
+        }
+
+        private static bool _ownEntryAdded;
+
+        /// <summary>
+        /// E2：PCL 没有下载页时，我们自己在标题栏加一个「下载插件」入口，
+        /// 并把面板常驻挂在内容区；点击入口随时可以回到我们的页面。
+        /// </summary>
+        private static void MountWithOwnEntry(Window window, PclBinder binder)
+        {
+            try
+            {
+                window.Dispatcher.Invoke(new Action(() =>
+                {
+                    MountOnce(window, binder);
+
+                    // 默认不往 PCL 标题栏塞入口：下载只发生在下载页。
+                    // 需要时用 PCLDL_E2_ENTRY=1 打开自建入口。
+                    if (Environment.GetEnvironmentVariable("PCLDL_E2_ENTRY") == "1" && !_ownEntryAdded)
+                        _ownEntryAdded = AddTitleBarEntry(window);
+                    Log("plugin: E2 挂载完成（自建入口" + (_ownEntryAdded ? "已添加" : "未启用/添加失败，仅常驻挂载") + "）");
+                }));
+            }
+            catch (Exception ex) { Log("plugin: E2 挂载失败 " + ex); }
+        }
+
+        /// <summary>
+        /// 在 FormMain.PanTitleSelect 尾部追加一个 MyRadioButton。
+        /// 只追加、不插入：PCL 用 Children(index) 对应 PageType 数值，追加不改变既有下标。
+        /// </summary>
+        private static bool AddTitleBarEntry(Window window)
+        {
+            try
+            {
+                var asm = window.GetType().Assembly;
+                var formMainType = window.GetType();
+
+                // 官方版里 x:Name 生成的是属性 PanTitleSelect（字段是 _PanTitleSelect），两种都试
+                object panValue = null;
+                var panProp = formMainType.GetProperty("PanTitleSelect",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (panProp != null && panProp.CanRead)
+                {
+                    try { panValue = panProp.GetValue(window, null); } catch { }
+                }
+                if (panValue == null)
+                {
+                    foreach (var fieldName in new[] { "_PanTitleSelect", "PanTitleSelect" })
+                    {
+                        var candidate = formMainType.GetField(fieldName,
+                            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                        if (candidate != null) { try { panValue = candidate.GetValue(window); } catch { } }
+                        if (panValue != null) break;
+                    }
+                }
+                var pan = panValue;
+                if (pan == null)
+                {
+                    var names = formMainType
+                        .GetMembers(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                        .Where(m => m.Name.IndexOf("Title", StringComparison.OrdinalIgnoreCase) >= 0)
+                        .Select(m => m.MemberType + ":" + m.Name)
+                        .Distinct()
+                        .ToArray();
+                    Log("plugin: 找不到 PanTitleSelect，跳过自建入口；候选=" + string.Join(",", names));
+                    return false;
+                }
+                var panel = pan as System.Windows.Controls.Panel;
+                if (panel == null) { Log("plugin: PanTitleSelect 不是 Panel，跳过自建入口"); return false; }
+
+                var radioType = asm.GetType("PCL.MyRadioButton", false);
+                if (radioType == null) { Log("plugin: 找不到 PCL.MyRadioButton"); return false; }
+
+                var button = (System.Windows.FrameworkElement)Activator.CreateInstance(radioType);
+                TrySet(button, "Text", "下载插件");
+                TrySet(button, "Tag", (panel.Children.Count).ToString());
+                TrySet(button, "Margin", new System.Windows.Thickness(18, 0, 0, 0));
+
+                var checkedEvent = radioType.GetEvent("Check", BindingFlags.Public | BindingFlags.Instance);
+                if (checkedEvent != null)
+                {
+                    var handlerType = checkedEvent.EventHandlerType;
+                    var method = typeof(PluginEntry).GetMethod("OnOwnEntryChecked",
+                        BindingFlags.NonPublic | BindingFlags.Static);
+                    var handler = Delegate.CreateDelegate(handlerType, method);
+                    checkedEvent.AddEventHandler(button, handler);
+                }
+
+                panel.Children.Add(button);
+                Log("plugin: 已在标题栏追加「下载插件」入口（index=" + (panel.Children.Count - 1) + "）");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log("plugin: 追加标题栏入口失败 " + ex.Message);
+                return false;
+            }
+        }
+
+        private static System.Windows.Window _mainWindow;
+
+        /// <summary>点击自建入口：把面板重新挂回内容区。</summary>
+        private static void OnOwnEntryChecked(object sender, bool raiseByMouse)
+        {
+            try
+            {
+                var window = _mainWindow;
+                if (window == null) return;
+                var binder = PclBinder.TryBind(window.GetType().Assembly);
+                window.Dispatcher.BeginInvoke(new Action(() => MountOnce(window, binder)));
+                Log("plugin: 自建入口被点击，重新挂载面板");
+            }
+            catch (Exception ex) { LogOnce("plugin: 自建入口点击处理失败 " + ex.Message); }
+        }
+
+        private static void TrySet(object target, string property, object value)
+        {
+            try
+            {
+                var prop = target.GetType().GetProperty(property, BindingFlags.Public | BindingFlags.Instance);
+                if (prop != null && prop.CanWrite) { prop.SetValue(target, value, null); return; }
+                var field = target.GetType().GetField(property, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (field != null) field.SetValue(target, value);
+            }
+            catch { }
         }
 
         private static Window _standalone;

@@ -44,6 +44,7 @@ namespace PclDl.Plugin.Ui
         private TextBlock _detail;
         private TextBox _packBox;
         private TextBox _pathBox;
+        private List<FrameworkElement> _sections;
         private TextBlock _packStatus;
         private PclDl.Core.Models.ManifestEntry _selected;
         private CancellationTokenSource _installCts;
@@ -79,6 +80,8 @@ namespace PclDl.Plugin.Ui
             Theme.Apply(scroll, Control.BackgroundProperty, "ColorBrush8", Brushes.Transparent);
 
             var page = new StackPanel { Margin = new Thickness(25, 10, 25, 40) };
+            var sections = new List<FrameworkElement>();
+            _sections = sections;
             scroll.Content = page;
 
             // —— 卡片 1：安装 ——
@@ -151,7 +154,7 @@ namespace PclDl.Plugin.Ui
             _status.Margin = new Thickness(0, 6, 0, 0);
             installBody.Children.Add(_status);
 
-            page.Children.Add(_ui.Card("安装 Minecraft", installBody));
+                        sections.Add(_ui.Card("安装 Minecraft", installBody));
 
             // —— 卡片 2：版本列表 ——
             var listBody = new StackPanel();
@@ -186,7 +189,7 @@ namespace PclDl.Plugin.Ui
             Theme.Apply(listScroll, Control.BackgroundProperty, "ColorBrush8", Brushes.Transparent);
             listBody.Children.Add(listScroll);
 
-            page.Children.Add(_ui.Card("版本列表", listBody));
+                        sections.Add(_ui.Card("版本列表", listBody));
 
             // —— 卡片 2b：任务队列 ——
             var taskBody = new StackPanel();
@@ -201,7 +204,7 @@ namespace PclDl.Plugin.Ui
 
             _taskPanel = new StackPanel();
             taskBody.Children.Add(_taskPanel);
-            page.Children.Add(_ui.Card("任务队列", taskBody));
+                        sections.Add(_ui.Card("任务队列", taskBody));
 
             // —— 卡片 3：导入本地整合包文件（不是社区资源浏览器）——
             var packBody = new StackPanel();
@@ -230,7 +233,7 @@ namespace PclDl.Plugin.Ui
             _packStatus.Margin = new Thickness(0, 0, 0, 4);
             packBody.Children.Add(_packStatus);
 
-            page.Children.Add(_ui.Card("导入本地整合包文件", packBody));
+                        sections.Add(_ui.Card("导入本地整合包文件", packBody));
 
             // —— 卡片 4：插件自检 ——
             var checkBody = new StackPanel();
@@ -239,9 +242,51 @@ namespace PclDl.Plugin.Ui
             checkBody.Children.Add(checkText);
             var logHint = _ui.Hint("日志：" + Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "PCL2Plugins", "plugin.log"));
             checkBody.Children.Add(logHint);
-            page.Children.Add(_ui.Card("插件自检", checkBody));
+                        sections.Add(_ui.Card("插件自检", checkBody));
 
-            Content = scroll;
+            // 仿 PCL 下载页：左侧分类导航 + 右侧内容区
+            var nav = new StackPanel { Margin = new Thickness(18, 12, 8, 12), Width = 158 };
+            var body = new StackPanel { Margin = new Thickness(6, 10, 18, 24) };
+
+            var navTitles = new[] { "原版游戏", "版本列表", "任务队列", "导入整合包", "插件自检" };
+            for (var i = 0; i < navTitles.Length; i++)
+            {
+                var index = i;
+                var button = _ui.Button(navTitles[i], index == 0, () => ShowSection(index), 30, new Thickness(0, 0, 0, 6));
+                button.HorizontalAlignment = HorizontalAlignment.Stretch;
+                nav.Children.Add(button);
+            }
+            nav.Children.Add(_ui.Hint("下载相关操作都在本页完成"));
+
+            var root = new Grid();
+            root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(178) });
+            root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            Grid.SetColumn(nav, 0);
+            Grid.SetColumn(body, 1);
+            root.Children.Add(nav);
+            root.Children.Add(body);
+
+            foreach (var section in sections)
+            {
+                section.Visibility = Visibility.Collapsed;
+                body.Children.Add(section);
+            }
+            if (sections.Count > 0) sections[0].Visibility = Visibility.Visible;
+
+            var bodyScroll = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Content = body
+            };
+            Theme.Apply(bodyScroll, Control.BackgroundProperty, "ColorBrush8", Brushes.Transparent);
+            root.Children.Remove(body);
+            var rightCell = new Grid();
+            rightCell.Children.Add(bodyScroll);
+            Grid.SetColumn(rightCell, 1);
+            root.Children.Add(rightCell);
+
+            Content = root;
 
             Loaded += (s, e) =>
             {
@@ -930,6 +975,14 @@ namespace PclDl.Plugin.Ui
             }
             catch { }
             return null;
+        }
+
+        /// <summary>左侧分类切换：一次只显示一个区块（仿 PCL 下载页的左侧列表 + 右侧内容）。</summary>
+        private void ShowSection(int index)
+        {
+            if (_sections == null) return;
+            for (var i = 0; i < _sections.Count; i++)
+                _sections[i].Visibility = i == index ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void UpdateStatus(string text)
